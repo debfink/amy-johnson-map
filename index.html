@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Amy Johnson Flight Map</title>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #080a12;
+      font-family: sans-serif;
+    }
+  </style>
+</head>
+
+<body>
+
+<script>
+
+let routes = [];
+let currentRouteIndex = 0;
+let pauseTimer = 0;
+let stars = [];
+let world;
+
+let labelSlots = [];
+let labeledCities = new Set();
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  textFont("sans-serif");
+
+  // ⭐ stars
+  for (let i = 0; i < 160; i++) {
+    stars.push({
+      x: random(width),
+      y: random(height),
+      r: random(0.5, 2),
+      speed: random(0.001, 0.01),
+      phase: random(TWO_PI)
+    });
+  }
+
+  // 🌍 world map
+  loadJSON(
+    "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json",
+    (data) => {
+      world = topojson.feature(data, data.objects.countries).features;
+    }
+  );
+
+  // ✈️ routes
+  routes = [
+    {
+      year: "1930",
+      legend: "Australia",
+      color: [201,168,76],
+      fact: "First woman to fly solo from England to Australia - 19 days - 17,700km",
+      stops: [
+        { name:"London", lon:-0.1278, lat:51.5074 },
+        { name:"Singapore", lon:103.8198, lat:1.3521 },
+        { name:"Darwin", lon:130.8456, lat:-12.4634 }
+      ],
+      progress: 0,
+      complete: false,
+      cityAlpha: []
+    },
+    {
+      year: "1931",
+      legend: "Tokyo",
+      color: [90,184,160],
+      fact: "London to Tokyo and back with Jim Mollison",
+      stops: [
+        { name:"London", lon:-0.1278, lat:51.5074 },
+        { name:"Moscow", lon:37.6173, lat:55.7558 },
+        { name:"Tokyo", lon:139.6917, lat:35.6895 }
+      ],
+      progress: 0,
+      complete: false,
+      cityAlpha: []
+    },
+    {
+      year: "1932",
+      legend: "Cape Town",
+      color: [212,130,106],
+      fact: "Set a new solo record London to Cape Town",
+      stops: [
+        { name:"London", lon:-0.1278, lat:51.5074 },
+        { name:"Casablanca", lon:-7.5898, lat:33.5731 },
+        { name:"Cape Town", lon:18.4241, lat:-33.9249 }
+      ],
+      progress: 0,
+      complete: false,
+      cityAlpha: []
+    }
+  ];
+
+  for (let r of routes) {
+    r.cityAlpha = new Array(r.stops.length).fill(0);
+  }
+}
+
+function draw() {
+  background(8,10,18);
+
+  labelSlots = [];
+  labeledCities.clear();
+
+  drawStars();
+  drawWorld();
+
+  push();
+  drawRoutes();
+  pop();
+
+  drawUI();
+  drawLegend();
+  animate();
+}
+
+/* ---------------- STARS ---------------- */
+function drawStars() {
+  noStroke();
+  for (let s of stars) {
+    let a = map(sin(frameCount * s.speed + s.phase), -1, 1, 50, 255);
+    fill(255, a);
+    circle(s.x, s.y, s.r);
+  }
+}
+
+/* ---------------- WORLD ---------------- */
+function drawWorld() {
+  if (!world) return;
+
+  stroke(255, 25);
+  strokeWeight(1);
+  noFill();
+
+  for (let c of world) {
+    beginShape();
+    for (let poly of c.geometry.coordinates) {
+      for (let i = 0; i < poly.length; i++) {
+        let p = project(poly[i][0], poly[i][1]);
+        vertex(p.x, p.y);
+      }
+    }
+    endShape();
+  }
+}
+
+/* ---------------- ROUTES ---------------- */
+function drawRoutes() {
+  for (let rIndex = 0; rIndex < routes.length; rIndex++) {
+    let r = routes[rIndex];
+
+    let total = r.stops.length - 1;
+    let t = r.progress * total;
+
+    stroke(...r.color);
+    strokeWeight(2);
+
+    drawPath(r, t);
+
+    for (let i = 0; i < r.stops.length; i++) {
+
+      let city = r.stops[i];
+      if (!city) continue;
+
+      if (city.name === "London" && rIndex !== 0) continue;
+
+      let key = rIndex + "-" + city.name;
+      if (labeledCities.has(key)) continue;
+
+      let p = project(city.lon, city.lat);
+
+      let alpha = (r.complete || r.progress > 0.05) ? 255 : 0;
+      r.cityAlpha[i] = lerp(r.cityAlpha[i], alpha, 0.08);
+
+      if (r.cityAlpha[i] < 10) continue;
+
+      labeledCities.add(key);
+
+      drawLabel(p.x, p.y, city.name, r.cityAlpha[i]);
+    }
+  }
+}
+
+/* ---------------- LABELS ---------------- */
+function drawLabel(x, y, label, alpha) {
+  noStroke();
+  fill(255, alpha);
+  textSize(11);
+  text(label, x + 10, y - 5);
+}
+
+/* ---------------- PATH ---------------- */
+function drawPath(r, t) {
+  if (!r || !r.stops) return;
+
+  noFill();
+  beginShape();
+
+  let total = r.stops.length - 1;
+
+  for (let i = 0; i < floor(t); i++) {
+    if (!r.stops[i] || !r.stops[i + 1]) continue;
+    drawArc(r.stops[i], r.stops[i + 1], 1);
+  }
+
+  if (floor(t) < total) {
+    let a = r.stops[floor(t)];
+    let b = r.stops[floor(t) + 1];
+    if (a && b) drawArc(a, b, t - floor(t));
+  }
+
+  endShape();
+}
+
+/* ---------------- ARC ---------------- */
+function drawArc(a, b, progress) {
+  if (!a || !b) return;
+
+  let steps = 35;
+
+  for (let i = 0; i <= steps * progress; i++) {
+    let t = i / steps;
+
+    let lon = lerp(a.lon, b.lon, t);
+    let lat = lerp(a.lat, b.lat, t);
+
+    let arc = sin(t * PI) * 40;
+
+    let p = project(lon, lat);
+    vertex(p.x, p.y - arc);
+  }
+}
+
+/* ---------------- UI ---------------- */
+function drawUI() {
+
+  fill(255);
+  textAlign(LEFT);
+
+  textSize(26);
+  text("Amy Johnson", 20, 40);
+
+  textSize(14);
+  text("Hull's Sky Pioneer 1903 - 1941", 20, 65);
+
+  let y = height - 120;
+
+  for (let i = 0; i <= currentRouteIndex; i++) {
+    fill(255);
+    textSize(13);
+    text(routes[i].fact, 20, y);
+    y += 25;
+  }
+}
+
+/* ---------------- LEGEND ---------------- */
+function drawLegend() {
+  let x = width - 260;
+  let y = 40;
+
+  for (let i = 0; i <= currentRouteIndex; i++) {
+    let r = routes[i];
+
+    fill(...r.color);
+    noStroke();
+    circle(x, y - 4, 8);
+
+    fill(255);
+    textSize(12);
+    text(`${r.year} ${r.legend}`, x + 12, y);
+
+    y += 22;
+  }
+}
+
+/* ---------------- PROJECTION ---------------- */
+function project(lon, lat) {
+  return {
+    x: map(lon, -180, 180, 0, width),
+    y: map(lat, 90, -90, 0, height)
+  };
+}
+
+/* ---------------- ANIMATION ---------------- */
+function animate() {
+  let r = routes[currentRouteIndex];
+  if (!r) return;
+
+  if (pauseTimer > 0) {
+    pauseTimer--;
+    return;
+  }
+
+  r.progress += 0.0025;
+
+  if (r.progress >= 1 && !r.complete) {
+    r.complete = true;
+    pauseTimer = 90;
+
+    if (currentRouteIndex < routes.length - 1) {
+      currentRouteIndex++;
+    }
+  }
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+}
+
+</script>
+</body>
+</html>
